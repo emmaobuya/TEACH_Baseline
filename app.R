@@ -170,7 +170,7 @@ ui <- page_navbar(
     p(class = "text-muted small",
       "Uses the Facility and Treatment Start Date Range filters in the sidebar, plus the filters below. ",
       "Each form has a due date counted from tbrx_start_date (TB refill: start of each period, e.g. 5-6 weeks is due at 5 weeks; ",
-      "Lab: Month 2 and Month 5; ART: monthly). Before the due date a form is Not yet Due; after it, ",
+      "Lab: Month 2 and Month 5; ART Refill: the next appointment date from the latest ART visit). Before the due date a form is Not yet Due; after it, ",
       "Due (0-14 days past due), Almost Overdue (15-30) and Overdue (>30). Total Missing excludes Not yet Due."),
     layout_columns(
       col_widths = c(3, 3, 3, 3),
@@ -302,7 +302,14 @@ server <- function(input, output, session) {
 
     list(
       screened             = if (nrow(df) == 0) NA_integer_ else sum(df$screening_form_complete == "Complete", na.rm = TRUE),
-      consent_missing      = if (nrow(df) == 0) NA_integer_ else sum(df$missing_consent_n, na.rm = TRUE),
+      # Waiting to Consent = eligible, no consent yet, screened 30 days ago or less
+      # (these are the Consent rows on the Missing Forms tab). Those past 30 days
+      # are closed out as "Not consented (>30 days)" and counted separately.
+      consent_missing      = if (nrow(df) == 0) NA_integer_ else
+        sum(df$missing_consent_n == 1 &
+              (is.na(df$calc_days_since_screening) | df$calc_days_since_screening <= 30), na.rm = TRUE),
+      consent_dropped      = if (nrow(df) == 0) NA_integer_ else
+        sum(df$missing_consent_n == 1 & df$calc_days_since_screening > 30, na.rm = TRUE),
       eligible             = if (nrow(df) == 0) NA_integer_ else sum(df$eligibility_status == "Yes", na.rm = TRUE),
       ineligible           = if (nrow(df) == 0) NA_integer_ else sum(df$eligibility_status == "No", na.rm = TRUE),
       consent_yes          = if (nrow(df) == 0) NA_integer_ else sum(df$consent == "Yes", na.rm = TRUE),
@@ -348,9 +355,19 @@ server <- function(input, output, session) {
     renderUI({
       val <- current_kpis()[[key]]
       meta <- kpi_meta[[key]]
+      note <- NULL
+      if (key == "consent_missing") {
+        dropped <- current_kpis()$consent_dropped
+        if (!is.na(dropped)) {
+          note <- p(class = "small mb-0",
+                    paste0("Screened 30 days ago or less. ", format(dropped, big.mark = ","),
+                           " more not consented >30 days (Close-out tab)."))
+        }
+      }
       value_box(
         title = meta$title,
         value = if (is.na(val)) "--" else format(val, big.mark = ","),
+        note,
         showcase = icon(meta$icon),
         theme = kpi_color[[key]]
       )
