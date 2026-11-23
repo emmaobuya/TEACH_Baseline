@@ -54,12 +54,12 @@ library(stringr)
 REDCAP_URL   <- Sys.getenv("TEACH2_REDCAP_URL",   unset = "https://utirc.mak.ac.ug:8181/api/")
 REDCAP_TOKEN <- Sys.getenv("TEACH2_REDCAP_TOKEN", unset = "B8CF23B137D2AF4728146CF1221015D3")
 
-if (REDCAP_TOKEN == "B8CF23B137D2AF4728146CF1221015D3") {
+if (!nzchar(REDCAP_TOKEN)) {
   warning("TEACH2_REDCAP_TOKEN is not set -- the dashboard will load with no data. ",
-          "Add it to .Renviron (see README.md).")
+          "Add it to .Renviron (see README.md) and restart R.")
 }
 
-REFRESH_SECONDS <- 1800  # how often the dashboard re-polls REDCap
+REFRESH_SECONDS <- 3600  # how often the dashboard re-polls REDCap
 
 # ---- Project structure (edit here if Questionnaire 2 names differ) ----
 EVENT_BASELINE <- "1. Baseline"
@@ -115,7 +115,14 @@ redcap_fetch_raw <- function() {
 # ------------------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------------------
-blank_to_na <- function(x) ifelse(is.na(x) | x == "", NA, x)
+# Always returns a CHARACTER vector (blank -> NA). The old ifelse() version
+# returned a LOGICAL vector when there were zero rows (e.g. no TB refill
+# forms submitted yet), which broke the anti_join on `period`.
+blank_to_na <- function(x) {
+  x <- as.character(x)
+  x[!is.na(x) & trimws(x) == ""] <- NA_character_
+  x
+}
 
 parse_redcap_date <- function(x) {
   suppressWarnings(as_date(blank_to_na(x)))
@@ -448,7 +455,10 @@ build_scheduled_missing <- function(base, schedule, completed_pairs, form_label)
     schedule, by = NULL
   ) %>%
     as_tibble() %>%
-    anti_join(completed_pairs, by = c("study_id", "period")) %>%
+    mutate(study_id = as.character(study_id), period = as.character(period)) %>%
+    anti_join(completed_pairs %>%
+                mutate(study_id = as.character(study_id), period = as.character(period)),
+              by = c("study_id", "period")) %>%
     mutate(
       due_date = if_else(unit == "months",
                          tbrx_start_date %m+% months(as.integer(n)),
